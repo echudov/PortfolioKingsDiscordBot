@@ -1,11 +1,6 @@
-import datetime
-import os
-from dotenv import load_dotenv
-
-
 class Strategy:
-    def __init__(self, id, messages, status, users_reacted):
-        self.id = id
+    def __init__(self, id_number, messages, status, users_reacted):
+        self.id = id_number
         self.messages = messages
         self.reacted = users_reacted
         self.status = status
@@ -30,4 +25,4 @@ class Strategy:
         if user_react.id in self.reacted:
             return
         else:
-            self.reacted.append(user_react)
+            self.reacted.append(user_react.id)
