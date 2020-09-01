@@ -25,4 +25,4 @@ class Strategy:
         if user_react.id in self.reacted:
             return
         else:
-            self.reacted.append(user_react.id)
+            self.reacted.append(user_react.idow )

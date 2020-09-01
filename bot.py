@@ -1,8 +1,9 @@
+#!/usr/bin/env python3
+
 import os
 import message as m
 import pickle
 import atexit
-import tkinter as tk
 
 import discord
 from dotenv import load_dotenv
@@ -32,19 +33,19 @@ def get_role_name(msg):
     """
     if len(msg.role_mentions) != 0:
         return str(msg.role_mentions[0].name)
-    if "@" in msg.content:
+    elif "@" in msg.content:
         return msg.content[msg.content.find("@") + 1:].split()[0]
     else:
         return "ERROR: Role not found"
 
 
-async def process_message(msg, active_strategies, guild):
+async def process_message(msg, active_strats, guild):
     """
     Processes the message, deals with any kind of role creation/deletion, and checks to see all valid conditions
     to make the message approved for the specific channel.  Adds the message to the active strategies/
     deletes strategy as needed.
     :param msg: Discord message
-    :param active_strategies: dictionary of active strategies
+    :param active_strats: dictionary of active strategies
     :param guild: Discord guild object
     :return: flag detailing success/failure
     """
@@ -54,7 +55,7 @@ async def process_message(msg, active_strategies, guild):
         return "not owner"
 
     # Checks if the message has already been seen
-    if any(strategy.contains(msg) for strategy in active_strategies.values()):
+    if any(strategy.contains(msg) for strategy in active_strats.values()):
         return "already covered"
 
     msg_type = message_type(msg)
@@ -65,18 +66,18 @@ async def process_message(msg, active_strategies, guild):
     # checks all types of messages and does necessary role creation/bookkeeping
     if msg_type == "start":
         # create new role
-        await guild.create_role(name=strat_id)
-        # get full role object
-        role = discord.utils.get(guild.roles, name=strat_id)
+
+        if strat_id not in [role.name for role in guild.roles]:
+            await guild.create_role(name=strat_id)
         # create strategy container
         strat = m.Strategy(id_number=strat_id, messages=[str(msg.content)], status="active", users_reacted=[])
         # add strategy to active strategies
-        active_strategies[strat_id] = strat
+        active_strats[strat_id] = strat
     elif msg_type == "update":
-        active_strategies[strat_id].add_message(msg)
+        active_strats[strat_id].add_message(msg)
     elif msg_type == "close":
         # take strategy out of the list of active strategies
-        active_strategies.pop(strat_id)
+        active_strats.pop(strat_id)
         role_to_remove = discord.utils.get(guild.roles, name=strat_id)
         try:
             await role_to_remove.delete(reason="Play Close")
@@ -88,13 +89,15 @@ async def process_message(msg, active_strategies, guild):
     return "message successfully processed"
 
 
-async def check_and_process_new_messages(last_msg, active_strategies, guild, channel_name='BOT_TEST_CHANNEL_ID', limit=20):
+async def check_and_process_new_messages(last_msg, active_strats, guild, channel_name='OPTIONS_SIGNALS_CHANNEL_ID', limit=20):
     """
-    Checks recent message history, processes messages and their reactions, and gets up to date.  All based on the last message seen.
+    Checks recent message history, processes messages and their reactions, and gets up to date.
+    All based on the last message seen.
     :param last_msg: last message seen before bot went offline
-    :param active_strategies: dictionary of all active strategies
+    :param active_strats: dictionary of all active strategies
     :param guild: guild context to search for the channel
     :param channel_name: which channel to check for messages
+    :param limit: how many messages to check
     :return: nothing
     """
     # gets all of the necessary messages
@@ -113,16 +116,16 @@ async def check_and_process_new_messages(last_msg, active_strategies, guild, cha
         # starts processing messages
         else:
             # process message
-            flag = await process_message(message, active_strategies, guild)
+            flag = await process_message(message, active_strats, guild)
             if flag == "message successfully processed":
-                print(active_strategies.values())
+                print(active_strats.values())
                 last_message[0] = message.content
             print(flag)
 
             # check for reactions and add roles
-            def check(message, reaction):
-                return reaction.emoji is not None and \
-                       any(active_strat.contains(message) for active_strat in active_strategies.values())
+            def check(msg, react):
+                return react.emoji is not None and \
+                       any(active_strat.contains(msg) for active_strat in active_strats.values())
 
             # loop through all of the reactions in the message, and all the users with that reaction.
             for reaction in message.reactions:
@@ -136,7 +139,7 @@ async def check_and_process_new_messages(last_msg, active_strategies, guild, cha
                         role = discord.utils.get(client.guilds[0].roles, name=name)
                         await user.add_roles(role)
                         print("Added role")
-                        active_strategies[name].react(user)
+                        active_strats[name].react(user)
 
 
 def save_progress(strategies, msg, strat_filename, msg_filename):
@@ -181,8 +184,8 @@ if __name__ == '__main__':
 
     # atexit function to save the progress.  Might need to implement a checker to find exit in the terminal
     def save_progress_with_names():
-        print('bruh')
         save_progress(active_strategies, last_message, strategy_filename, last_msg_filename)
+        print('Progress Saved')
 
 
     atexit.register(save_progress_with_names)
@@ -209,7 +212,8 @@ if __name__ == '__main__':
         await client.change_presence(status=discord.Status.idle, activity=activity)
 
         if last_message[0] != "":
-            await check_and_process_new_messages(last_message[0], active_strategies, guild, channel_name='BOT_TEST_CHANNEL_ID')
+            await check_and_process_new_messages(last_message[0], active_strategies, client.guilds[0],
+                                                 channel_name='OPTIONS_SIGNALS_CHANNEL_ID')
 
 
     @client.event
@@ -226,13 +230,13 @@ if __name__ == '__main__':
         channel = guild.get_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
 
-        def check(message, emoji, member):
-            return emoji is not None and \
-                   payload.channel_id == int(os.getenv('BOT_TEST_CHANNEL_ID')) and \
-                   any(active_strat.contains(message) for active_strat in active_strategies.values())
+        def check(msg, emoji_char):
+            return emoji_char is not None and \
+                   payload.channel_id == int(os.getenv('OPTIONS_SIGNALS_CHANNEL_ID')) and \
+                   any(active_strat.contains(msg) for active_strat in active_strategies.values())
 
         print(member.name)
-        if check(message, emoji, member):
+        if check(message, emoji):
             print(member.name + " reacted")
             print("They reacted to: " + message.content)
             name = get_role_name(message)
@@ -252,14 +256,13 @@ if __name__ == '__main__':
         :return: nothing
         """
         guild = client.guilds[0]
-        emoji = payload.emoji
         user = guild.get_member(payload.user_id)
         channel = guild.get_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
 
-        def check(message):
-            return payload.channel_id == int(os.getenv('BOT_TEST_CHANNEL_ID')) and \
-                   any(active_strat.contains(message) for active_strat in active_strategies.values())
+        def check(msg):
+            return payload.channel_id == int(os.getenv('OPTIONS_SIGNALS_CHANNEL_ID')) and \
+                   any(active_strat.contains(msg) for active_strat in active_strategies.values())
 
         if check(message):
             print(user.name + " Removed Reaction")
@@ -276,7 +279,7 @@ if __name__ == '__main__':
     async def on_message(message):
         channel = message.channel
 
-        if channel.name == "bot_test":
+        if channel.id == int(os.getenv('OPTIONS_SIGNALS_CHANNEL_ID')):
             flag = await process_message(message, active_strategies, client.guilds[0])
             if flag == "message successfully processed":
                 print(active_strategies.values())
